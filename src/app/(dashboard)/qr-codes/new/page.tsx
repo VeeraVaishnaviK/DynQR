@@ -35,6 +35,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog'
+import { QRBlurProtection } from '@/components/qr-blur-protection'
 
 const QR_TYPES = [
     { type: 'url' as QRType, icon: Globe, label: 'Website URL', description: 'Link to any webpage' },
@@ -83,6 +84,37 @@ export default function NewQRCodePage() {
 
     // QR Preview
     const [qrDataUrl, setQrDataUrl] = useState('')
+    const [willBeLockedAfterCreation, setWillBeLockedAfterCreation] = useState(false)
+
+    // Check quota on mount
+    useEffect(() => {
+        checkQuota()
+    }, [])
+
+    const checkQuota = async () => {
+        try {
+            const supabase = createClient()
+            const { data: { user } } = await supabase.auth.getUser()
+
+            if (!user) return
+
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('qr_used, qr_quota, subscription_status')
+                .eq('id', user.id)
+                .single()
+
+            if (!profile) return
+
+            const isFreeUser = profile.subscription_status === 'free'
+            const remainingQuota = profile.qr_quota - profile.qr_used
+
+            // Will be locked if: free user AND creating beyond quota
+            setWillBeLockedAfterCreation(isFreeUser && remainingQuota <= 0)
+        } catch (error) {
+            console.error('Error checking quota:', error)
+        }
+    }
 
     // Generate QR preview
     useEffect(() => {
@@ -667,22 +699,24 @@ export default function NewQRCodePage() {
                             <CardDescription>See how your QR code will look</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div
-                                className="aspect-square rounded-lg flex items-center justify-center p-4"
-                                style={{ backgroundColor: colorBg }}
-                            >
-                                {qrDataUrl ? (
-                                    <img
-                                        src={qrDataUrl}
-                                        alt="QR Code Preview"
-                                        className="w-full h-full object-contain"
-                                    />
-                                ) : (
-                                    <div className="text-center text-muted-foreground">
-                                        <p>Enter content to see preview</p>
-                                    </div>
-                                )}
-                            </div>
+                            <QRBlurProtection isLocked={willBeLockedAfterCreation}>
+                                <div
+                                    className="aspect-square rounded-lg flex items-center justify-center p-4"
+                                    style={{ backgroundColor: colorBg }}
+                                >
+                                    {qrDataUrl ? (
+                                        <img
+                                            src={qrDataUrl}
+                                            alt="QR Code Preview"
+                                            className="w-full h-full object-contain"
+                                        />
+                                    ) : (
+                                        <div className="text-center text-muted-foreground">
+                                            <p>Enter content to see preview</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </QRBlurProtection>
                         </CardContent>
                     </Card>
                 </div>

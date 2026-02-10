@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import QRCode from 'qrcode'
+import { QRBlurProtection } from '@/components/qr-blur-protection'
 
 type QRCodeData = {
     id: string
@@ -30,6 +31,7 @@ export default function QRCodeDetailPage() {
     const [qrCode, setQrCode] = useState<QRCodeData | null>(null)
     const [loading, setLoading] = useState(true)
     const [qrDataUrl, setQrDataUrl] = useState<string>('')
+    const [isLocked, setIsLocked] = useState(false)
 
     useEffect(() => {
         if (params.id) {
@@ -48,6 +50,13 @@ export default function QRCodeDetailPage() {
                 return
             }
 
+            // Fetch user profile to check quota
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('qr_quota, subscription_status')
+                .eq('id', user.id)
+                .single()
+
             const { data, error } = await supabase
                 .from('qr_codes')
                 .select('*')
@@ -62,6 +71,21 @@ export default function QRCodeDetailPage() {
             }
 
             setQrCode(data)
+
+            // Check if this QR code is locked (beyond free quota)
+            // Get count of QR codes created before this one
+            const { count } = await supabase
+                .from('qr_codes')
+                .select('*', { count: 'exact', head: true })
+                .eq('user_id', user.id)
+                .lte('created_at', data.created_at)
+
+            const qrIndex = (count || 0)
+            const isFreeUser = !profile || profile.subscription_status === 'free'
+            const quota = profile?.qr_quota || 5
+
+            // Lock if: free user AND this QR is beyond quota
+            setIsLocked(isFreeUser && qrIndex > quota)
 
             // Generate QR code image
             const qrUrl = await QRCode.toDataURL(data.destination_url, {
@@ -190,16 +214,28 @@ export default function QRCodeDetailPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {qrDataUrl && (
-                            <div className="flex justify-center p-8 bg-muted rounded-lg">
-                                <img src={qrDataUrl} alt={qrCode.name} className="rounded-lg" />
-                            </div>
+                            <QRBlurProtection isLocked={isLocked}>
+                                <div className="flex justify-center p-8 bg-muted rounded-lg">
+                                    <img src={qrDataUrl} alt={qrCode.name} className="rounded-lg" />
+                                </div>
+                            </QRBlurProtection>
                         )}
                         <div className="flex gap-2">
-                            <Button onClick={handleDownloadPNG} variant="outline" className="flex-1">
+                            <Button
+                                onClick={handleDownloadPNG}
+                                variant="outline"
+                                className="flex-1"
+                                disabled={isLocked}
+                            >
                                 <Download className="mr-2 h-4 w-4" />
                                 PNG
                             </Button>
-                            <Button onClick={handleDownloadSVG} variant="gradient" className="flex-1">
+                            <Button
+                                onClick={handleDownloadSVG}
+                                variant="gradient"
+                                className="flex-1"
+                                disabled={isLocked}
+                            >
                                 <Download className="mr-2 h-4 w-4" />
                                 SVG
                             </Button>

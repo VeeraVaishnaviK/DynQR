@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { QrCode, Search, Grid, List, Plus, MoreHorizontal, Eye, Edit, Trash2, ExternalLink, Loader2 } from 'lucide-react'
+import { QrCode, Search, Grid, List, Plus, MoreHorizontal, Eye, Edit, Trash2, ExternalLink, Loader2, Lock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
+import { QRBlurProtection } from '@/components/qr-blur-protection'
 
 type QRCode = {
     id: string
@@ -29,6 +30,7 @@ export default function QRCodesPage() {
     const [selectedQR, setSelectedQR] = useState<string | null>(null)
     const [qrCodes, setQrCodes] = useState<QRCode[]>([])
     const [loading, setLoading] = useState(true)
+    const [lockedQRIds, setLockedQRIds] = useState<Set<string>>(new Set())
 
     // Fetch QR codes from Supabase
     useEffect(() => {
@@ -47,6 +49,13 @@ export default function QRCodesPage() {
                 return
             }
 
+            // Fetch user profile to check quota
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('qr_quota, subscription_status')
+                .eq('id', user.id)
+                .single()
+
             // Fetch QR codes for the user
             const { data, error } = await supabase
                 .from('qr_codes')
@@ -60,6 +69,23 @@ export default function QRCodesPage() {
                 setQrCodes([])
             } else {
                 setQrCodes(data || [])
+
+                // Determine which QR codes are locked
+                const isFreeUser = !profile || profile.subscription_status === 'free'
+                const quota = profile?.qr_quota || 5
+
+                if (isFreeUser && data && data.length > quota) {
+                    // Sort by creation date ascending to get oldest first
+                    const sortedQRs = [...data].sort((a, b) =>
+                        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                    )
+
+                    // QR codes beyond quota are locked
+                    const locked = new Set(sortedQRs.slice(quota).map(qr => qr.id))
+                    setLockedQRIds(locked)
+                } else {
+                    setLockedQRIds(new Set())
+                }
             }
         } catch (error) {
             console.error('Unexpected error:', error)
@@ -175,21 +201,27 @@ export default function QRCodesPage() {
                         <Card key={qr.id} className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
                             <CardContent className="p-4">
                                 {/* QR Preview */}
-                                <div
-                                    className="aspect-square rounded-lg mb-4 flex items-center justify-center relative overflow-hidden"
-                                    style={{ backgroundColor: qr.color_bg }}
+                                <QRBlurProtection
+                                    isLocked={lockedQRIds.has(qr.id)}
+                                    showUpgradeButton={false}
+                                    className="mb-4"
                                 >
-                                    <QrCode
-                                        className="w-3/4 h-3/4"
-                                        style={{ color: qr.color_fg }}
-                                        strokeWidth={0.5}
-                                    />
-                                    {!qr.is_active && (
-                                        <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
-                                            <span className="text-sm font-medium text-muted-foreground">Inactive</span>
-                                        </div>
-                                    )}
-                                </div>
+                                    <div
+                                        className="aspect-square rounded-lg flex items-center justify-center relative overflow-hidden"
+                                        style={{ backgroundColor: qr.color_bg }}
+                                    >
+                                        <QrCode
+                                            className="w-3/4 h-3/4"
+                                            style={{ color: qr.color_fg }}
+                                            strokeWidth={0.5}
+                                        />
+                                        {!qr.is_active && (
+                                            <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                                                <span className="text-sm font-medium text-muted-foreground">Inactive</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </QRBlurProtection>
 
                                 {/* QR Info */}
                                 <div className="space-y-2">
@@ -239,14 +271,22 @@ export default function QRCodesPage() {
                                     </div>
                                     <div className="flex items-center justify-between text-sm text-muted-foreground">
                                         <span>{qr.current_scans} scans</span>
-                                        <span className={cn(
-                                            'px-2 py-0.5 rounded-full text-xs font-medium',
-                                            qr.is_active
-                                                ? 'bg-green-500/10 text-green-600'
-                                                : 'bg-muted text-muted-foreground'
-                                        )}>
-                                            {qr.is_active ? 'Active' : 'Inactive'}
-                                        </span>
+                                        <div className="flex gap-2">
+                                            {lockedQRIds.has(qr.id) && (
+                                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-500/10 text-orange-600 flex items-center gap-1">
+                                                    <Lock className="h-3 w-3" />
+                                                    Locked
+                                                </span>
+                                            )}
+                                            <span className={cn(
+                                                'px-2 py-0.5 rounded-full text-xs font-medium',
+                                                qr.is_active
+                                                    ? 'bg-green-500/10 text-green-600'
+                                                    : 'bg-muted text-muted-foreground'
+                                            )}>
+                                                {qr.is_active ? 'Active' : 'Inactive'}
+                                            </span>
+                                        </div>
                                     </div>
                                     <p className="text-xs text-muted-foreground">
                                         Created {new Date(qr.created_at).toLocaleDateString()}
@@ -266,18 +306,29 @@ export default function QRCodesPage() {
                                     className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors"
                                 >
                                     <div className="flex items-center gap-4">
-                                        <div
-                                            className="h-12 w-12 rounded-lg flex items-center justify-center"
-                                            style={{ backgroundColor: qr.color_bg }}
+                                        <QRBlurProtection
+                                            isLocked={lockedQRIds.has(qr.id)}
+                                            showUpgradeButton={false}
+                                            className="h-12 w-12 flex-shrink-0"
                                         >
-                                            <QrCode
-                                                className="h-8 w-8"
-                                                style={{ color: qr.color_fg }}
-                                                strokeWidth={0.5}
-                                            />
-                                        </div>
+                                            <div
+                                                className="h-12 w-12 rounded-lg flex items-center justify-center"
+                                                style={{ backgroundColor: qr.color_bg }}
+                                            >
+                                                <QrCode
+                                                    className="h-8 w-8"
+                                                    style={{ color: qr.color_fg }}
+                                                    strokeWidth={0.5}
+                                                />
+                                            </div>
+                                        </QRBlurProtection>
                                         <div>
-                                            <p className="font-medium">{qr.name}</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="font-medium">{qr.name}</p>
+                                                {lockedQRIds.has(qr.id) && (
+                                                    <Lock className="h-3 w-3 text-orange-600" />
+                                                )}
+                                            </div>
                                             <p className="text-sm text-muted-foreground">
                                                 {qr.qr_type} • Created {new Date(qr.created_at).toLocaleDateString()}
                                             </p>
