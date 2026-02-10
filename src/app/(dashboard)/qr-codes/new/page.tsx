@@ -25,6 +25,16 @@ import { cn } from '@/lib/utils'
 import { generateQRDataURL, QR_TYPE_LABELS, ERROR_CORRECTION_LEVELS } from '@/lib/qr/generator'
 import type { QRContent, QRType, QRStyle, ErrorCorrectionLevel } from '@/types'
 import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
+import { generateUniqueShortCode } from '@/lib/utils/short-code'
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog'
 
 const QR_TYPES = [
     { type: 'url' as QRType, icon: Globe, label: 'Website URL', description: 'Link to any webpage' },
@@ -44,6 +54,7 @@ export default function NewQRCodePage() {
     const router = useRouter()
     const [step, setStep] = useState(1)
     const [loading, setLoading] = useState(false)
+    const [showUpgradeDialog, setShowUpgradeDialog] = useState(false)
 
     // Step 1: QR Type
     const [qrType, setQrType] = useState<QRType>('url')
@@ -152,23 +163,147 @@ export default function NewQRCodePage() {
 
     const handleCreate = async () => {
         setLoading(true)
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1500))
-        toast.success('QR code created successfully!')
-        router.push('/qr-codes')
-    }
 
-    const handleDownload = async (format: 'png' | 'svg') => {
-        if (!qrDataUrl) return
+        try {
+            const supabase = createClient()
 
-        if (format === 'png') {
-            const link = document.createElement('a')
-            link.download = `${name || 'qrcode'}.png`
-            link.href = qrDataUrl
-            link.click()
-            toast.success('QR code downloaded!')
-        } else {
-            toast.info('SVG download coming soon!')
+            // Get authenticated user
+            const { data: { user }, error: authError } = await supabase.auth.getUser()
+            if (authError || !user) {
+                toast.error('You must be logged in to create QR codes')
+                setLoading(false)
+                return
+            }
+
+            // Check user quota
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('qr_used, qr_quota, subscription_status')
+                .eq('id', user.id)
+                .single()
+
+            if (profileError || !profile) {
+                toast.error('Unable to fetch profile data')
+                setLoading(false)
+                return
+            }
+
+            const remainingQuota = profile.qr_quota - profile.qr_used
+
+            // Block creation if quota exceeded
+            if (remainingQuota <= 0 && profile.subscription_status === 'free') {
+                toast.error('You have reached your QR code limit. Please upgrade to create more.')
+                setShowUpgradeDialog(true)
+                setLoading(false)
+                return
+            }
+
+            // Show warning when approaching limit
+            if (remainingQuota <= 2 && remainingQuota > 0 && profile.subscription_status === 'free') {
+                toast.warning(`Only ${remainingQuota} QR code${remainingQuota === 1 ? '' : 's'} remaining. Consider upgrading!`)
+            }
+
+            // Build destination URL based on QR type
+            let destinationUrl = ''
+            let originalUrl = ''
+
+            switch (qrType) {
+                case 'url':
+                    destinationUrl = url
+                    originalUrl = url
+                    break
+                case 'email':
+                    destinationUrl = `mailto:${email}${emailSubject ? `?subject=${encodeURIComponent(emailSubject)}` : ''}`
+                    originalUrl = email
+                    break
+                case 'phone':
+                    destinationUrl = `tel:${phone}`
+                    originalUrl = phone
+                    break
+                case 'sms':
+                    destinationUrl = `sms:${phone}${smsMessage ? `?body=${encodeURIComponent(smsMessage)}` : ''}`
+                    originalUrl = phone
+                    break
+                case 'wifi':
+                    destinationUrl = `WIFI:T:${wifiEncryption};S:${wifiSSID};P:${wifiPassword};;`
+                    originalUrl = wifiSSID
+                    break
+                case 'vcard':
+                    destinationUrl = `BEGIN:VCARD\nVERSION:3.0\nFN:${vcardFirstName} ${vcardLastName}\nN:${vcardLastName};${vcardFirstName}\nEMAIL:${vcardEmail}\nTEL:${vcardPhone}\nORG:${vcardCompany}\nEND:VCARD`
+                    originalUrl = `${vcardFirstName} ${vcardLastName}`
+                    break
+                case 'text':
+                    destinationUrl = text
+                    originalUrl = text
+                    break
+            }
+
+            // Generate unique short code
+            const shortCode = await generateUniqueShortCode(async (code) => {
+                const { data } = await supabase
+                    .from('qr_codes')
+                    .select('id')
+                    .eq('short_code', code)
+                    .single()
+                return !!data
+            })
+
+            // Insert QR code into database
+            const { data: qrCode, error: insertError } = await supabase
+                .from('qr_codes')
+                .insert({
+                    user_id: user.id,
+                    name,
+                    short_code: shortCode,
+                    qr_type: qrType,
+                    destination_url: destinationUrl,
+                    original_url: originalUrl,
+                    color_fg: colorFg,
+                    color_bg: colorBg,
+                    error_correction: errorCorrection,
+                    is_dynamic: true,
+                    is_active: true,
+                })
+                .select()
+                .single()
+
+            if (insertError) {
+                console.error('Insert error:', insertError)
+                toast.error('Failed to create QR code: ' + insertError.message)
+                setLoading(false)
+                return
+            }
+
+            // Update user's QR usage count
+            const { error: rpcError } = await supabase.rpc('increment', {
+                table_name: 'profiles',
+                column_name: 'qr_used',
+                row_id: user.id
+            })
+
+            // Fallback: manually fetch and increment if RPC fails
+            if (rpcError) {
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('qr_used')
+                    .eq('id', user.id)
+                    .single()
+
+                if (profile) {
+                    await supabase
+                        .from('profiles')
+                        .update({ qr_used: profile.qr_used + 1 })
+                        .eq('id', user.id)
+                }
+            }
+
+            toast.success('QR code created successfully!')
+            router.push(`/qr-codes/${qrCode.id}`)
+        } catch (error) {
+            console.error('Error creating QR code:', error)
+            toast.error('An unexpected error occurred')
+        } finally {
+            setLoading(false)
         }
     }
 
@@ -548,27 +683,6 @@ export default function NewQRCodePage() {
                                     </div>
                                 )}
                             </div>
-
-                            {step === 3 && qrDataUrl && (
-                                <div className="mt-4 flex gap-2">
-                                    <Button
-                                        variant="outline"
-                                        className="flex-1"
-                                        onClick={() => handleDownload('png')}
-                                    >
-                                        <Download className="mr-2 h-4 w-4" />
-                                        PNG
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        className="flex-1"
-                                        onClick={() => handleDownload('svg')}
-                                    >
-                                        <Download className="mr-2 h-4 w-4" />
-                                        SVG
-                                    </Button>
-                                </div>
-                            )}
                         </CardContent>
                     </Card>
                 </div>
@@ -603,6 +717,100 @@ export default function NewQRCodePage() {
                     </Button>
                 )}
             </div>
+
+            {/* Upgrade Dialog */}
+            <Dialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Upgrade Your Plan</DialogTitle>
+                        <DialogDescription>
+                            You've reached your free QR code limit. Choose a plan to continue creating QR codes.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        {/* Pay Per QR */}
+                        <Card className="border-2 hover:border-primary/50 transition-colors">
+                            <CardContent className="p-6">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="text-lg font-semibold">Pay Per QR</h3>
+                                        <p className="text-sm text-muted-foreground">One-time payment for single QR code</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-3xl font-bold">₹5</p>
+                                        <p className="text-sm text-muted-foreground">per QR code</p>
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    className="w-full mt-4"
+                                    onClick={() => toast.info('Payment integration coming soon! This will redirect to payment gateway.')}
+                                >
+                                    Buy Now
+                                </Button>
+                            </CardContent>
+                        </Card>
+
+                        {/* Monthly Plan */}
+                        <Card className="border-2 border-primary">
+                            <CardContent className="p-6">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="text-lg font-semibold">Monthly Plan</h3>
+                                            <span className="text-xs bg-primary text-primary-foreground px-2 py-1 rounded">POPULAR</span>
+                                        </div>
+                                        <p className="text-sm text-muted-foreground">Unlimited QR codes</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-3xl font-bold">₹99</p>
+                                        <p className="text-sm text-muted-foreground">per month</p>
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="gradient"
+                                    className="w-full mt-4"
+                                    onClick={() => toast.info('Payment integration coming soon! This will redirect to payment gateway.')}
+                                >
+                                    Subscribe Monthly
+                                </Button>
+                            </CardContent>
+                        </Card>
+
+                        {/* Annual Plan */}
+                        <Card className="border-2 hover:border-primary/50 transition-colors">
+                            <CardContent className="p-6">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="text-lg font-semibold">Annual Plan</h3>
+                                            <span className="text-xs bg-green-500 text-white px-2 py-1 rounded">SAVE 16%</span>
+                                        </div>
+                                        <p className="text-sm text-muted-foreground">Unlimited QR codes</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-3xl font-bold">₹999</p>
+                                        <p className="text-sm text-muted-foreground">per year</p>
+                                        <p className="text-xs text-green-600">Save ₹189/year</p>
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    className="w-full mt-4"
+                                    onClick={() => toast.info('Payment integration coming soon! This will redirect to payment gateway.')}
+                                >
+                                    Subscribe Annually
+                                </Button>
+                            </CardContent>
+                        </Card>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={() => setShowUpgradeDialog(false)}>
+                            Maybe Later
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

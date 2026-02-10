@@ -1,35 +1,91 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Check, CreditCard, Receipt, Download, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PRICING_PLANS } from '@/types'
 import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
+
+type UserBillingData = {
+    currentPlan: string
+    qrUsed: number
+    qrQuota: number
+}
 
 export default function BillingPage() {
-    const [loading, setLoading] = useState<string | null>(null)
+    const router = useRouter()
+    const [loading, setLoading] = useState(true)
+    const [actionLoading, setActionLoading] = useState<string | null>(null)
     const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly')
+    const [billingData, setBillingData] = useState<UserBillingData>({
+        currentPlan: 'free',
+        qrUsed: 0,
+        qrQuota: 5
+    })
 
-    // Mock current user data
-    const currentPlan = 'free'
-    const qrUsed = 3
-    const qrQuota = 5
+    useEffect(() => {
+        fetchBillingData()
+    }, [])
+
+    const fetchBillingData = async () => {
+        try {
+            const supabase = createClient()
+            const { data: { user } } = await supabase.auth.getUser()
+
+            if (!user) {
+                toast.error('Please sign in')
+                router.push('/login')
+                return
+            }
+
+            const { data: profile, error } = await supabase
+                .from('profiles')
+                .select('qr_quota, qr_used')
+                .eq('id', user.id)
+                .single()
+
+            if (error) {
+                console.error('Error fetching profile:', error)
+            } else if (profile) {
+                setBillingData({
+                    currentPlan: 'free', // TODO: Add plan_type column to profiles table
+                    qrUsed: profile.qr_used || 0,
+                    qrQuota: profile.qr_quota || 5
+                })
+            }
+        } catch (error) {
+            console.error('Unexpected error:', error)
+            toast.error('Failed to load billing information')
+        } finally {
+            setLoading(false)
+        }
+    }
 
     const handleSubscribe = async (plan: string) => {
-        setLoading(plan)
+        setActionLoading(plan)
         // Simulate Razorpay integration
         await new Promise(resolve => setTimeout(resolve, 2000))
         toast.info('Razorpay integration coming soon! This is a demo.')
-        setLoading(null)
+        setActionLoading(null)
     }
 
     const handleBuyQR = async () => {
-        setLoading('pay-per-qr')
+        setActionLoading('pay-per-qr')
         await new Promise(resolve => setTimeout(resolve, 1500))
         toast.info('Pay-per-QR feature coming soon!')
-        setLoading(null)
+        setActionLoading(null)
+    }
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        )
     }
 
     return (
@@ -53,18 +109,18 @@ export default function BillingPage() {
                         <div>
                             <h3 className="text-2xl font-bold">{PRICING_PLANS.free.name}</h3>
                             <p className="text-muted-foreground">
-                                {qrUsed} of {qrQuota} QR codes used
+                                {billingData.qrUsed} of {billingData.qrQuota} QR codes used
                             </p>
                             <div className="w-full max-w-xs h-2 bg-muted rounded-full mt-2">
                                 <div
                                     className="h-full bg-primary rounded-full transition-all"
-                                    style={{ width: `${(qrUsed / qrQuota) * 100}%` }}
+                                    style={{ width: `${(billingData.qrUsed / billingData.qrQuota) * 100}%` }}
                                 />
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <Button variant="outline" onClick={handleBuyQR} disabled={loading === 'pay-per-qr'}>
-                                {loading === 'pay-per-qr' ? (
+                            <Button variant="outline" onClick={handleBuyQR} disabled={actionLoading === 'pay-per-qr'}>
+                                {actionLoading === 'pay-per-qr' ? (
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 ) : null}
                                 Buy More QR Codes (₹5/each)
@@ -142,9 +198,9 @@ export default function BillingPage() {
                                 variant={selectedPlan === 'monthly' ? 'gradient' : 'outline'}
                                 className="w-full"
                                 onClick={() => handleSubscribe('monthly')}
-                                disabled={loading === 'monthly'}
+                                disabled={actionLoading === 'monthly'}
                             >
-                                {loading === 'monthly' ? (
+                                {actionLoading === 'monthly' ? (
                                     <>
                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                         Processing...
@@ -189,9 +245,9 @@ export default function BillingPage() {
                                 variant={selectedPlan === 'yearly' ? 'gradient' : 'outline'}
                                 className="w-full"
                                 onClick={() => handleSubscribe('yearly')}
-                                disabled={loading === 'yearly'}
+                                disabled={actionLoading === 'yearly'}
                             >
-                                {loading === 'yearly' ? (
+                                {actionLoading === 'yearly' ? (
                                     <>
                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                         Processing...

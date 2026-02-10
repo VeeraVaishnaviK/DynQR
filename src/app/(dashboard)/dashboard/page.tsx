@@ -8,20 +8,70 @@ export default async function DashboardPage() {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
-    // For demo purposes, using mock data
-    const stats = {
-        totalQRCodes: 3,
-        totalScans: 156,
-        scansToday: 12,
+    // Fetch real stats from database
+    let stats = {
+        totalQRCodes: 0,
+        totalScans: 0,
+        scansToday: 0,
         qrQuota: 5,
-        qrUsed: 3,
+        qrUsed: 0,
     }
 
-    const recentQRCodes = [
-        { id: '1', name: 'Website Link', scans: 89, createdAt: '2024-02-08' },
-        { id: '2', name: 'Contact Card', scans: 45, createdAt: '2024-02-07' },
-        { id: '3', name: 'WiFi Access', scans: 22, createdAt: '2024-02-06' },
-    ]
+    let recentQRCodes: Array<{ id: string; name: string; scans: number; createdAt: string }> = []
+
+    if (user) {
+        // Get user profile with quota info
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('qr_quota, qr_used')
+            .eq('id', user.id)
+            .single()
+
+        if (profile) {
+            stats.qrQuota = profile.qr_quota || 5
+            stats.qrUsed = profile.qr_used || 0
+        }
+
+        // Get total QR codes count
+        const { count: qrCount } = await supabase
+            .from('qr_codes')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+
+        stats.totalQRCodes = qrCount || 0
+
+        //Get QR codes with their scan counts
+        const { data: qrCodes } = await supabase
+            .from('qr_codes')
+            .select('id, name, current_scans, created_at')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(3)
+
+        if (qrCodes) {
+            // Calculate total scans across all QR codes
+            stats.totalScans = qrCodes.reduce((sum, qr) => sum + (qr.current_scans || 0), 0)
+
+            recentQRCodes = qrCodes.map(qr => ({
+                id: qr.id,
+                name: qr.name,
+                scans: qr.current_scans || 0,
+                createdAt: new Date(qr.created_at).toLocaleDateString()
+            }))
+        }
+
+        // Get scans today - Note: This requires qr_scans table data
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+
+        const { count: todayScans } = await supabase
+            .from('qr_scans')
+            .select('*', { count: 'exact', head: true })
+            .gte('scanned_at', today.toISOString())
+            .in('qr_code_id', qrCodes?.map(qr => qr.id) || [])
+
+        stats.scansToday = todayScans || 0
+    }
 
     return (
         <div className="space-y-6">

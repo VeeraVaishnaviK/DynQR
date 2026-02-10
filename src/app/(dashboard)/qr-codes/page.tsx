@@ -1,59 +1,96 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { QrCode, Search, Grid, List, Plus, MoreHorizontal, Eye, Edit, Trash2, ExternalLink } from 'lucide-react'
+import { QrCode, Search, Grid, List, Plus, MoreHorizontal, Eye, Edit, Trash2, ExternalLink, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
+import { toast } from 'sonner'
 
-// Mock data for QR codes
-const mockQRCodes = [
-    {
-        id: '1',
-        name: 'Website Link',
-        shortCode: 'abc123',
-        destinationUrl: 'https://example.com',
-        qrType: 'url',
-        scans: 89,
-        isActive: true,
-        createdAt: '2024-02-08',
-        colorFg: '#000000',
-        colorBg: '#FFFFFF',
-    },
-    {
-        id: '2',
-        name: 'Contact Card',
-        shortCode: 'def456',
-        destinationUrl: 'vcard data',
-        qrType: 'vcard',
-        scans: 45,
-        isActive: true,
-        createdAt: '2024-02-07',
-        colorFg: '#7C3AED',
-        colorBg: '#FFFFFF',
-    },
-    {
-        id: '3',
-        name: 'WiFi Access',
-        shortCode: 'ghi789',
-        destinationUrl: 'wifi config',
-        qrType: 'wifi',
-        scans: 22,
-        isActive: false,
-        createdAt: '2024-02-06',
-        colorFg: '#059669',
-        colorBg: '#FFFFFF',
-    },
-]
+type QRCode = {
+    id: string
+    name: string
+    short_code: string
+    destination_url: string
+    qr_type: string
+    current_scans: number
+    is_active: boolean
+    created_at: string
+    color_fg: string
+    color_bg: string
+}
 
 export default function QRCodesPage() {
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedQR, setSelectedQR] = useState<string | null>(null)
+    const [qrCodes, setQrCodes] = useState<QRCode[]>([])
+    const [loading, setLoading] = useState(true)
 
-    const filteredQRCodes = mockQRCodes.filter(qr =>
+    // Fetch QR codes from Supabase
+    useEffect(() => {
+        fetchQRCodes()
+    }, [])
+
+    const fetchQRCodes = async () => {
+        try {
+            const supabase = createClient()
+
+            // Get authenticated user
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) {
+                toast.error('Please sign in to view your QR codes')
+                setLoading(false)
+                return
+            }
+
+            // Fetch QR codes for the user
+            const { data, error } = await supabase
+                .from('qr_codes')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+
+            if (error) {
+                console.error('Error fetching QR codes:', error)
+                toast.error('Failed to load QR codes')
+                setQrCodes([])
+            } else {
+                setQrCodes(data || [])
+            }
+        } catch (error) {
+            console.error('Unexpected error:', error)
+            toast.error('An unexpected error occurred')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const handleDelete = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this QR code?')) return
+
+        try {
+            const supabase = createClient()
+            const { error } = await supabase
+                .from('qr_codes')
+                .delete()
+                .eq('id', id)
+
+            if (error) {
+                toast.error('Failed to delete QR code')
+            } else {
+                toast.success('QR code deleted successfully')
+                fetchQRCodes() // Refresh the list
+            }
+        } catch (error) {
+            toast.error('An unexpected error occurred')
+        }
+    }
+
+    const filteredQRCodes = qrCodes.filter(qr =>
         qr.name.toLowerCase().includes(searchQuery.toLowerCase())
     )
 
@@ -105,7 +142,14 @@ export default function QRCodesPage() {
             </div>
 
             {/* QR Codes Grid/List */}
-            {filteredQRCodes.length === 0 ? (
+            {loading ? (
+                <Card className="py-16">
+                    <CardContent className="flex flex-col items-center justify-center text-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+                        <p className="text-muted-foreground">Loading your QR codes...</p>
+                    </CardContent>
+                </Card>
+            ) : filteredQRCodes.length === 0 ? (
                 <Card className="py-16">
                     <CardContent className="flex flex-col items-center justify-center text-center">
                         <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-4">
@@ -133,14 +177,14 @@ export default function QRCodesPage() {
                                 {/* QR Preview */}
                                 <div
                                     className="aspect-square rounded-lg mb-4 flex items-center justify-center relative overflow-hidden"
-                                    style={{ backgroundColor: qr.colorBg }}
+                                    style={{ backgroundColor: qr.color_bg }}
                                 >
                                     <QrCode
                                         className="w-3/4 h-3/4"
-                                        style={{ color: qr.colorFg }}
+                                        style={{ color: qr.color_fg }}
                                         strokeWidth={0.5}
                                     />
-                                    {!qr.isActive && (
+                                    {!qr.is_active && (
                                         <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
                                             <span className="text-sm font-medium text-muted-foreground">Inactive</span>
                                         </div>
@@ -181,7 +225,10 @@ export default function QRCodesPage() {
                                                             <Edit className="h-4 w-4" />
                                                             Edit
                                                         </Link>
-                                                        <button className="flex items-center gap-2 w-full px-3 py-2 text-sm text-destructive hover:bg-destructive/10">
+                                                        <button
+                                                            onClick={() => handleDelete(qr.id)}
+                                                            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+                                                        >
                                                             <Trash2 className="h-4 w-4" />
                                                             Delete
                                                         </button>
@@ -191,18 +238,18 @@ export default function QRCodesPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center justify-between text-sm text-muted-foreground">
-                                        <span>{qr.scans} scans</span>
+                                        <span>{qr.current_scans} scans</span>
                                         <span className={cn(
                                             'px-2 py-0.5 rounded-full text-xs font-medium',
-                                            qr.isActive
+                                            qr.is_active
                                                 ? 'bg-green-500/10 text-green-600'
                                                 : 'bg-muted text-muted-foreground'
                                         )}>
-                                            {qr.isActive ? 'Active' : 'Inactive'}
+                                            {qr.is_active ? 'Active' : 'Inactive'}
                                         </span>
                                     </div>
                                     <p className="text-xs text-muted-foreground">
-                                        Created {qr.createdAt}
+                                        Created {new Date(qr.created_at).toLocaleDateString()}
                                     </p>
                                 </div>
                             </CardContent>
@@ -221,33 +268,33 @@ export default function QRCodesPage() {
                                     <div className="flex items-center gap-4">
                                         <div
                                             className="h-12 w-12 rounded-lg flex items-center justify-center"
-                                            style={{ backgroundColor: qr.colorBg }}
+                                            style={{ backgroundColor: qr.color_bg }}
                                         >
                                             <QrCode
                                                 className="h-8 w-8"
-                                                style={{ color: qr.colorFg }}
+                                                style={{ color: qr.color_fg }}
                                                 strokeWidth={0.5}
                                             />
                                         </div>
                                         <div>
                                             <p className="font-medium">{qr.name}</p>
                                             <p className="text-sm text-muted-foreground">
-                                                {qr.qrType} • Created {qr.createdAt}
+                                                {qr.qr_type} • Created {new Date(qr.created_at).toLocaleDateString()}
                                             </p>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-4">
                                         <div className="text-right hidden sm:block">
-                                            <p className="font-semibold">{qr.scans}</p>
+                                            <p className="font-semibold">{qr.current_scans}</p>
                                             <p className="text-sm text-muted-foreground">scans</p>
                                         </div>
                                         <span className={cn(
                                             'px-2 py-0.5 rounded-full text-xs font-medium hidden sm:inline-flex',
-                                            qr.isActive
+                                            qr.is_active
                                                 ? 'bg-green-500/10 text-green-600'
                                                 : 'bg-muted text-muted-foreground'
                                         )}>
-                                            {qr.isActive ? 'Active' : 'Inactive'}
+                                            {qr.is_active ? 'Active' : 'Inactive'}
                                         </span>
                                         <div className="flex items-center gap-1">
                                             <Link href={`/qr-codes/${qr.id}`}>
@@ -260,7 +307,12 @@ export default function QRCodesPage() {
                                                     <Edit className="h-4 w-4" />
                                                 </Button>
                                             </Link>
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive">
+                                            <Button
+                                                onClick={() => handleDelete(qr.id)}
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                            >
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -42,6 +42,12 @@ export default function DashboardLayout({
     const { theme, setTheme } = useTheme()
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [userMenuOpen, setUserMenuOpen] = useState(false)
+    const [mounted, setMounted] = useState(false)
+
+    // Prevent hydration mismatch by only rendering theme-dependent content after mount
+    useEffect(() => {
+        setMounted(true)
+    }, [])
 
     const handleLogout = async () => {
         const supabase = createClient()
@@ -119,8 +125,17 @@ export default function DashboardLayout({
                             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                         >
-                            {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-                            {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                            {mounted ? (
+                                <>
+                                    {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                                    {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                                </>
+                            ) : (
+                                <>
+                                    <Moon className="h-5 w-5" />
+                                    Theme
+                                </>
+                            )}
                         </button>
                         <button
                             onClick={handleLogout}
