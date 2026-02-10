@@ -32,6 +32,7 @@ export default function QRCodeDetailPage() {
     const [loading, setLoading] = useState(true)
     const [qrDataUrl, setQrDataUrl] = useState<string>('')
     const [isLocked, setIsLocked] = useState(false)
+    const [unlocking, setUnlocking] = useState(false)
 
     useEffect(() => {
         if (params.id) {
@@ -164,6 +165,49 @@ export default function QRCodeDetailPage() {
         }
     }
 
+    const handleUnlockQR = async (qrId: string) => {
+        try {
+            setUnlocking(true)
+            const supabase = createClient()
+
+            // Get user info
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) {
+                toast.error('Please sign in')
+                return
+            }
+
+            // For now, show payment info message
+            // TODO: Integrate with Razorpay payment gateway
+            toast.info('Payment integration coming soon! This will charge ₹5 via Razorpay.')
+
+            // Simulated payment success for testing
+            // In production, this would be after successful Razorpay payment callback
+            const confirmPayment = confirm(
+                'Unlock this QR code for ₹5?\n\nNote: Payment integration is not yet active. Click OK to simulate successful payment.'
+            )
+
+            if (!confirmPayment) {
+                setUnlocking(false)
+                return
+            }
+
+            // Mark QR as individually paid/unlocked
+            // You'll need to add 'is_individually_paid' column to qr_codes table
+            // For now, we can use a workaround by updating the user's quota temporarily
+
+            toast.success('QR code unlocked successfully!')
+            setIsLocked(false)
+            // Optionally refresh
+            fetchQRCode()
+        } catch (error) {
+            console.error('Unlock error:', error)
+            toast.error('An error occurred')
+        } finally {
+            setUnlocking(false)
+        }
+    }
+
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
@@ -214,7 +258,12 @@ export default function QRCodeDetailPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {qrDataUrl && (
-                            <QRBlurProtection isLocked={isLocked}>
+                            <QRBlurProtection
+                                isLocked={isLocked}
+                                showUnlockButton={true}
+                                qrId={qrCode.id}
+                                onUnlock={handleUnlockQR}
+                            >
                                 <div className="flex justify-center p-8 bg-muted rounded-lg">
                                     <img src={qrDataUrl} alt={qrCode.name} className="rounded-lg" />
                                 </div>
@@ -225,7 +274,7 @@ export default function QRCodeDetailPage() {
                                 onClick={handleDownloadPNG}
                                 variant="outline"
                                 className="flex-1"
-                                disabled={isLocked}
+                                disabled={isLocked || unlocking}
                             >
                                 <Download className="mr-2 h-4 w-4" />
                                 PNG
@@ -234,7 +283,7 @@ export default function QRCodeDetailPage() {
                                 onClick={handleDownloadSVG}
                                 variant="gradient"
                                 className="flex-1"
-                                disabled={isLocked}
+                                disabled={isLocked || unlocking}
                             >
                                 <Download className="mr-2 h-4 w-4" />
                                 SVG

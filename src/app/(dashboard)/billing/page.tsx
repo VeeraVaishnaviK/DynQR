@@ -9,6 +9,7 @@ import { PRICING_PLANS } from '@/types'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { BuyQRDialog } from '@/components/buy-qr-dialog'
 
 type UserBillingData = {
     currentPlan: string
@@ -21,6 +22,7 @@ export default function BillingPage() {
     const [loading, setLoading] = useState(true)
     const [actionLoading, setActionLoading] = useState<string | null>(null)
     const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'yearly'>('monthly')
+    const [showBuyDialog, setShowBuyDialog] = useState(false)
     const [billingData, setBillingData] = useState<UserBillingData>({
         currentPlan: 'free',
         qrUsed: 0,
@@ -73,11 +75,8 @@ export default function BillingPage() {
         setActionLoading(null)
     }
 
-    const handleBuyQR = async () => {
-        setActionLoading('pay-per-qr')
-        await new Promise(resolve => setTimeout(resolve, 1500))
-        toast.info('Pay-per-QR feature coming soon!')
-        setActionLoading(null)
+    const handleBuyQR = () => {
+        setShowBuyDialog(true)
     }
 
     if (loading) {
@@ -119,10 +118,7 @@ export default function BillingPage() {
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <Button variant="outline" onClick={handleBuyQR} disabled={actionLoading === 'pay-per-qr'}>
-                                {actionLoading === 'pay-per-qr' ? (
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                ) : null}
+                            <Button variant="outline" onClick={handleBuyQR}>
                                 Buy More QR Codes (₹5/each)
                             </Button>
                         </div>
@@ -297,6 +293,13 @@ export default function BillingPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Buy QR Dialog */}
+            <BuyQRDialog
+                open={showBuyDialog}
+                onOpenChange={setShowBuyDialog}
+                onSuccess={() => fetchBillingData()}
+            />
         </div>
     )
 }

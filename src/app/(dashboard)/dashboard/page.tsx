@@ -28,7 +28,16 @@ export default async function DashboardPage() {
             .single()
 
         if (profile) {
-            stats.qrQuota = profile.qr_quota || 5
+            // Get purchased amount
+            const { data: purchases } = await supabase
+                .from('qr_purchases')
+                .select('quantity')
+                .eq('user_id', user.id)
+                .eq('payment_status', 'completed')
+
+            const purchasedAmount = purchases?.reduce((sum, p) => sum + p.quantity, 0) || 0
+
+            stats.qrQuota = (profile.qr_quota || 5)
             stats.qrUsed = profile.qr_used || 0
         }
 
@@ -101,7 +110,7 @@ export default async function DashboardPage() {
                     <CardContent>
                         <div className="text-2xl font-bold">{stats.totalQRCodes}</div>
                         <p className="text-xs text-muted-foreground">
-                            {stats.qrUsed} of {stats.qrQuota} used (Free tier)
+                            {stats.qrUsed} of {stats.qrQuota} used {stats.qrQuota > 5 ? '(includes purchased)' : '(Free tier)'}
                         </p>
                     </CardContent>
                 </Card>

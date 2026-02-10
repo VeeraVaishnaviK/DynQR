@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Lock } from 'lucide-react'
+import { Lock, IndianRupee } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -7,6 +7,9 @@ interface QRBlurProtectionProps {
     isLocked: boolean
     className?: string
     showUpgradeButton?: boolean
+    showUnlockButton?: boolean
+    qrId?: string
+    onUnlock?: (qrId: string) => void
     children: React.ReactNode
 }
 
@@ -14,10 +17,19 @@ export function QRBlurProtection({
     isLocked,
     className,
     showUpgradeButton = true,
+    showUnlockButton = false,
+    qrId,
+    onUnlock,
     children
 }: QRBlurProtectionProps) {
     if (!isLocked) {
         return <>{children}</>
+    }
+
+    const handleUnlock = () => {
+        if (qrId && onUnlock) {
+            onUnlock(qrId)
+        }
     }
 
     return (
@@ -40,20 +52,36 @@ export function QRBlurProtection({
 
                 {/* Watermark Text */}
                 <h3 className="text-xl font-semibold mb-2 text-center px-4">
-                    Upgrade to Unlock
+                    {showUnlockButton ? 'Unlock this QR Code' : 'Upgrade to Unlock'}
                 </h3>
                 <p className="text-sm text-muted-foreground text-center mb-4 px-4 max-w-[280px]">
-                    You've reached your free QR code limit. Subscribe to unlock this QR code.
+                    {showUnlockButton
+                        ? 'Pay ₹5 to unlock just this QR code, or subscribe for unlimited access.'
+                        : 'You\'ve reached your free QR code limit. Subscribe to unlock this QR code.'
+                    }
                 </p>
 
-                {/* Upgrade Button */}
-                {showUpgradeButton && (
-                    <Link href="/pricing">
-                        <Button variant="gradient" size="sm">
-                            View Plans
+                {/* Action Buttons */}
+                <div className="flex gap-2 flex-wrap justify-center">
+                    {showUnlockButton && qrId && (
+                        <Button
+                            variant="default"
+                            size="sm"
+                            onClick={handleUnlock}
+                            className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
+                        >
+                            <IndianRupee className="mr-1 h-4 w-4" />
+                            Pay ₹5 to Unlock
                         </Button>
-                    </Link>
-                )}
+                    )}
+                    {showUpgradeButton && (
+                        <Link href="/pricing">
+                            <Button variant={showUnlockButton ? "outline" : "gradient"} size="sm">
+                                View All Plans
+                            </Button>
+                        </Link>
+                    )}
+                </div>
 
                 {/* Diagonal Watermark */}
                 <div

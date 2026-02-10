@@ -36,6 +36,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog'
 import { QRBlurProtection } from '@/components/qr-blur-protection'
+import { BuyQRDialog } from '@/components/buy-qr-dialog'
 
 const QR_TYPES = [
     { type: 'url' as QRType, icon: Globe, label: 'Website URL', description: 'Link to any webpage' },
@@ -56,6 +57,7 @@ export default function NewQRCodePage() {
     const [step, setStep] = useState(1)
     const [loading, setLoading] = useState(false)
     const [showUpgradeDialog, setShowUpgradeDialog] = useState(false)
+    const [showBuyDialog, setShowBuyDialog] = useState(false)
 
     // Step 1: QR Type
     const [qrType, setQrType] = useState<QRType>('url')
@@ -778,7 +780,10 @@ export default function NewQRCodePage() {
                                 <Button
                                     variant="outline"
                                     className="w-full mt-4"
-                                    onClick={() => toast.info('Payment integration coming soon! This will redirect to payment gateway.')}
+                                    onClick={() => {
+                                        setShowUpgradeDialog(false)
+                                        setShowBuyDialog(true)
+                                    }}
                                 >
                                     Buy Now
                                 </Button>
@@ -845,6 +850,13 @@ export default function NewQRCodePage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Buy QR Dialog */}
+            <BuyQRDialog
+                open={showBuyDialog}
+                onOpenChange={setShowBuyDialog}
+                onSuccess={() => checkQuota()}
+            />
         </div>
     )
 }
